@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+.env
+*.db
+firebase-service-account.json
+# Editor files
+.vscode/
+.idea/
+*.log
