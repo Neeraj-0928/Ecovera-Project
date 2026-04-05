@@ -120,3 +120,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 // --- FIX: Removed extra closing '}' brace from here ---
+
+// Shared helper for reverse geocoding
+async function getReverseGeocode(latitude, longitude) {
+    const apiUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`;
+    try {
+        const response = await fetch(apiUrl, {
+            headers: { 'User-Agent': 'Ecovera-App/1.0' }
+        });
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('Reverse geocoding failed:', error);
+        throw error;
+    }
+}

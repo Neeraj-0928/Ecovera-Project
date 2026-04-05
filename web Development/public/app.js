@@ -345,14 +345,14 @@ document.addEventListener("DOMContentLoaded", () => {
       
       if (user.location) {
         const { pin, state, city, landmark, village, building_number } = user.location;
-        const addressParts = [
+        const addressParts = Array.from(new Set([
           building_number,
           village,
           landmark,
           city,
           state,
           pin
-        ].filter(Boolean);
+        ].filter(Boolean)));
         
         addressEl.textContent = addressParts.join(', ');
       } else {
