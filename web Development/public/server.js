@@ -170,6 +170,18 @@ apiRouter.put('/user/:mobile', async (req, res) => {
   }
 });
 
+apiRouter.post('/user/:mobile/delete', async (req, res) => {
+  try {
+    const { mobile } = req.params;
+    const result = await sqliteDB.deleteUser(mobile);
+    if (!result.success) return res.status(500).json({ error: 'Failed to delete user' });
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
 // Pricing data for waste types (matching the HTML data attributes)
 const wastePricing = {
   'Cardboard': { pricePerKg: 12, treesPerKg: 0.017 },
@@ -206,26 +218,44 @@ apiRouter.post('/orders', async (req, res) => {
     }
 
     // --- Geocoding Implementation ---
-    // Use Nominatim (OpenStreetMap) to convert address into coordinates
     if (orderData.address) {
       try {
-        const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(orderData.address)}&limit=1`;
-        const geoResponse = await fetch(geoUrl, {
-          headers: { 'User-Agent': 'Ecovera-App/1.0' }
-        });
-        const geoData = await geoResponse.json();
+        const fetchGeo = async (query) => {
+          const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+          const geoResponse = await fetch(geoUrl, { headers: { 'User-Agent': 'Ecovera-App/1.0' } });
+          return await geoResponse.json();
+        };
+
+        // Try 1: Full Address
+        let geoData = await fetchGeo(orderData.address);
+
+        // Try 2: If failed, try extracting Pincode (assuming last 6 digits)
+        if (!geoData || geoData.length === 0) {
+          const pincodeMatch = orderData.address.match(/\b\d{6}\b/);
+          if (pincodeMatch) {
+            geoData = await fetchGeo(pincodeMatch[0]);
+          }
+        }
+
+        // Try 3: If still failed, try City (assuming it's after the pincode or at the end)
+        if (!geoData || geoData.length === 0) {
+          const parts = orderData.address.split(',');
+          if (parts.length > 2) {
+            const cityPart = parts[parts.length - 2].trim();
+            geoData = await fetchGeo(cityPart);
+          }
+        }
 
         if (geoData && geoData.length > 0) {
           orderData.latitude = parseFloat(geoData[0].lat);
           orderData.longitude = parseFloat(geoData[0].lon);
         } else {
-          // Fallback to random around Bangalore if specific address not found
+          // Fallback to random around Bangalore
           orderData.latitude = 12.9716 + (Math.random() - 0.5) * 0.1;
           orderData.longitude = 77.5946 + (Math.random() - 0.5) * 0.1;
         }
       } catch (geoError) {
         console.error('Geocoding error:', geoError);
-        // Fallback to random around Bangalore
         orderData.latitude = 12.9716 + (Math.random() - 0.5) * 0.1;
         orderData.longitude = 77.5946 + (Math.random() - 0.5) * 0.1;
       }
@@ -409,6 +439,11 @@ apiRouter.get('/recycler/orders/:recyclerId', async (req, res) => {
     console.error('Error getting recycler orders:', error);
     res.status(500).json({ error: 'Failed to get recycler orders' });
   }
+});
+
+// Pricing endpoint
+apiRouter.get('/pricing', (req, res) => {
+  res.json({ success: true, pricing: wastePricing });
 });
 
 // Public routes

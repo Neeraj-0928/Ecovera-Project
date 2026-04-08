@@ -3,6 +3,21 @@ document.addEventListener("DOMContentLoaded", () => {
   // API Base URL - Update for production
   const API_BASE = window.location.hostname === 'your-production-url.com' ? 'https://your-production-url.com' : window.location.origin;
 
+  // Get pricing from server
+  let globalPricing = {};
+  async function fetchPricing() {
+    try {
+      const result = await apiCall('/api/pricing');
+      if (result.success) {
+        globalPricing = result.pricing;
+        console.log('Global pricing loaded:', globalPricing);
+      }
+    } catch (error) {
+      console.error('Failed to fetch pricing:', error);
+    }
+  }
+  fetchPricing();
+
   // Auth token storage
   let authToken = sessionStorage.getItem('authToken');
 
@@ -399,8 +414,26 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } else if (flow === 'delete-account') {
       if (confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
-        // Implement account deletion logic here
-        alert('Account deletion is not implemented yet.');
+        try {
+          const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+          if (!user.mobile) {
+             alert('User mobile not found.');
+             return;
+          }
+          const result = await apiCall(`/api/user/${user.mobile}/delete`, {
+            method: 'POST'
+          });
+          if (result.success) {
+            alert(translate('account_removed_success') || 'Account deleted successfully.');
+            sessionStorage.clear();
+            window.location.href = 'index.html';
+          } else {
+            alert('Failed to delete account.');
+          }
+        } catch (error) {
+          console.error('Error deleting account:', error);
+          alert('Failed to delete account.');
+        }
       }
     } else if (flow === 'add-new-address') {
       showSection('add-new-address');
@@ -545,7 +578,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Update location display with current language
   function updateLocationDisplay() {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-    const locationEl = document.querySelector('[data-translate="your_location"]');
+    const locationEl = document.getElementById('display-location');
 
     if (user.location && locationEl) {
       const { city, state, pin } = user.location;
@@ -553,10 +586,10 @@ document.addEventListener("DOMContentLoaded", () => {
         const format = translate('location_format');
         locationEl.textContent = format.replace('{city}', city).replace('{state}', state).replace('{pin}', pin);
       } else {
-        locationEl.textContent = 'Location not set';
+        locationEl.textContent = translate('location_not_set') || 'Location not set';
       }
     } else if (locationEl) {
-      locationEl.textContent = 'Location not set';
+      locationEl.textContent = translate('location_not_set') || 'Location not set';
     }
   }
 
@@ -579,10 +612,10 @@ document.addEventListener("DOMContentLoaded", () => {
         const format = translate('location_format');
         locationEl.textContent = format.replace('{city}', city).replace('{state}', state).replace('{pin}', pin);
       } else {
-        locationEl.textContent = 'Location not set';
+        locationEl.textContent = translate('location_not_set') || 'Location not set';
       }
     } else if (locationEl) {
-      locationEl.textContent = 'Location not set';
+      locationEl.textContent = translate('location_not_set') || 'Location not set';
     }
 
     // Update greeting
@@ -604,15 +637,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // Populate saved address section with user location data
   function populateSavedAddress() {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-    const addressTitle = document.querySelector('#saved-address .item-title');
-    const addressMeta = document.querySelector('#saved-address .meta');
+    const addressMeta = document.getElementById('saved-address-text');
 
     if (user.location) {
       const { hno, landmark, city, state, pin } = user.location;
       const fullAddress = [hno, landmark, city, state, pin].filter(Boolean).join(', ');
-      if (addressMeta) addressMeta.textContent = fullAddress || 'Location not set';
+      if (addressMeta) addressMeta.textContent = fullAddress || (translate('location_not_set') || 'Location not set');
     } else {
-      if (addressMeta) addressMeta.textContent = 'Location not set';
+      if (addressMeta) addressMeta.textContent = translate('location_not_set') || 'Location not set';
     }
   }
 
@@ -671,6 +703,129 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       console.error('Error sending order to recyclers:', error);
     }
+  }
+
+  // Location detection for pickup address
+  const detectLocationBtn = document.getElementById('detect-location-btn');
+  if (detectLocationBtn) {
+    detectLocationBtn.addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        alert('Geolocation is not supported by your browser.');
+        return;
+      }
+
+      detectLocationBtn.disabled = true;
+      detectLocationBtn.textContent = translate('detecting_location') || 'Detecting...';
+
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const { latitude, longitude } = position.coords;
+
+        try {
+          // getReverseGeocode is defined in user.js
+          const data = await getReverseGeocode(latitude, longitude);
+
+          if (data && data.address) {
+            const pickupAddressEl = document.getElementById('pickup-address');
+            const addressParts = [
+              data.address.house_number || '',
+              data.address.road || '',
+              data.address.suburb || '',
+              data.address.city || data.address.town || data.address.village || '',
+              data.address.state || '',
+              data.address.postcode || ''
+            ].filter(Boolean);
+
+            pickupAddressEl.textContent = addressParts.join(', ');
+
+            // Store the coordinates for later use
+            pickupAddressEl.dataset.latitude = latitude;
+            pickupAddressEl.dataset.longitude = longitude;
+          } else {
+            alert('Could not determine address from your location.');
+          }
+        } catch (error) {
+          console.error('Reverse geocoding failed:', error);
+          alert('Failed to fetch address details. Please enter manually.');
+        } finally {
+          detectLocationBtn.disabled = false;
+          detectLocationBtn.textContent = translate('detect_my_location') || 'Detect My Location';
+        }
+      }, (error) => {
+        alert(`Error getting location: ${error.message}`);
+        detectLocationBtn.disabled = false;
+        detectLocationBtn.textContent = translate('detect_my_location') || 'Detect My Location';
+      });
+    });
+  }
+
+  const submitPickupBtn = document.getElementById('submit-pickup-btn');
+  if (submitPickupBtn) {
+    submitPickupBtn.addEventListener('click', async () => {
+      const selectedItems = [];
+      // Find all items with a quantity entered
+      document.querySelectorAll('#sell-details .waste-quantity').forEach(input => {
+        const quantity = parseFloat(input.value) || 0;
+        if (quantity > 0) {
+          const card = input.closest('.list-card');
+          selectedItems.push({
+            type: card.getAttribute('data-waste-type'),
+            quantity: quantity,
+            pricePerKg: parseFloat(card.getAttribute('data-price')),
+            treesPerKg: parseFloat(card.getAttribute('data-trees'))
+          });
+        }
+      });
+
+      if (selectedItems.length === 0) {
+        alert(translate('select_waste') || "Please enter a quantity for at least one waste type.");
+        return;
+      }
+
+      // Get address from the pickup-address element
+      const pickupAddressEl = document.getElementById('pickup-address');
+      const address = pickupAddressEl.textContent.trim();
+
+      if (!address || address === translate('location_not_set') || address === 'Location not set') {
+        alert(translate('enter_address') || "Please set your pickup address.");
+        return;
+      }
+
+      try {
+        const user = JSON.parse(sessionStorage.getItem('user') || '{}');
+        const userEmail = user.email;
+
+        if (!userEmail) {
+          alert('User session not found. Please log in again.');
+          return;
+        }
+
+        const totalQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+        const wasteType = selectedItems.map(item => item.type).join(', ');
+
+        const result = await apiCall('/api/orders', {
+          method: 'POST',
+          body: JSON.stringify({ 
+            userId: userEmail, 
+            wasteType, 
+            quantity: totalQuantity, 
+            address, 
+            status: 'pending' 
+          })
+        });
+
+        if (result.success) {
+          alert(translate('pickup_submitted') || 'Pickup request submitted successfully!');
+          // Refresh to clear form and see updated stats
+          await loadDashboardData();
+          showSection('orders');
+        } else {
+          alert('Failed to submit order: ' + (result.error || 'Please try again.'));
+        }
+      } catch (error) {
+        console.error('Error submitting pickup request:', error);
+        alert('Failed to submit pickup request. Please try again.');
+      }
+    });
   }
 
   // Skip authentication checks since login/OTP pages are removed
